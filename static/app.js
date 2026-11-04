@@ -733,14 +733,19 @@ async function transcribe(pcm, purpose = "", quality = "fast") {
 /* ---------- Drawing helpers for the orb ---------- */
 
 // One travelling wave field drives the center, its visible ripples and both particle renderers.
-const ORB_WAVE = { core: 0.24, number: Math.PI * 2 / 0.42, speed: 0.24, amplitude: 0.038 };
+const ORB_WAVE = { core: 0.065, number: Math.PI * 2 / 0.42, speed: 0.24, amplitude: 0.038 };
 function orbWaveAt(radius, time) {
   const distance = Math.max(0, radius - ORB_WAVE.core);
   const phase = distance * ORB_WAVE.number - time * ORB_WAVE.speed * ORB_WAVE.number;
   return Math.sin(phase) * Math.exp(-distance * 0.8);
 }
 function orbCoreRadius(time, energy) {
-  return ORB_WAVE.core * (1 + Math.sin(-time * ORB_WAVE.speed * ORB_WAVE.number) * 0.025 + energy * 0.025);
+  return ORB_WAVE.core * (1 + Math.sin(-time * ORB_WAVE.speed * ORB_WAVE.number) * 0.025 + energy * 0.25);
+}
+// Speaking amount and audio level already ease in and out in each renderer's frame loop.
+function orbSpeechMotion(time, level, speaking) {
+  const amount = REDUCED ? 0 : speaking * (0.35 + level * 0.65);
+  return { x: Math.sin(time * 1.45) * 0.026 * amount, y: Math.sin(time * 2.1 + 0.4) * 0.034 * amount };
 }
 
 // Shared by WebGL and the 2D fallback. Find nearby links once with a spatial hash,
@@ -869,11 +874,13 @@ class Orb {
   }
 
   draw() {
-    const { g, t, dpr, cx, cy, cloud, projected } = this;
+    const { g, t, dpr, cloud, projected } = this;
     const W = this.canvas.width, H = this.canvas.height;
     const shown = 1 - Math.pow(1 - this.intro, 3);
     const R = this.size * 0.48 * 0.94;
     const L = this.level, listen = this.listenAmt, speak = this.speakAmt;
+    const sway = orbSpeechMotion(t, L, speak);
+    const cx = this.cx + sway.x * R, cy = this.cy - sway.y * R;
     const ice = mixColor([116, 212, 185], AQUA, listen * 0.5);
     g.clearRect(0, 0, W, H);
     if (this.world) {
@@ -905,7 +912,7 @@ class Orb {
     const motion = REDUCED ? 0 : 1;
     const breath = 1 + (Math.sin(t * 0.7) * 0.008 + L * (listen * 0.035 + speak * 0.065)) * motion;
     const coreRadius = orbCoreRadius(t, L * (listen + speak) * motion);
-    this.drawCore(R, shown, ice, coreRadius);
+    this.drawCore(R, shown, ice, coreRadius, cx, cy);
     const wave = this.waveSource?.();
     for (let i = 0; i < cloud.points.length; i++) {
       const p = cloud.points[i], at = i * 4;
@@ -922,9 +929,7 @@ class Orb {
       const reveal = Math.max(0, Math.min(1, (this.intro * 1.45 - p.r * 0.4) / 0.55));
       projected[at] = cx + x * perspective * R;
       projected[at + 1] = cy - p.y * scale * perspective * R;
-      const screenRadius = Math.hypot(x, p.y * scale) * perspective;
-      const behindCore = screenRadius < coreRadius && z < Math.sqrt(Math.max(0, coreRadius * coreRadius - screenRadius * screenRadius));
-      projected[at + 2] = (0.18 + depth * 0.65) * reveal * (0.7 + Math.sin(t * 0.8 + p.seed * 70) * 0.18 + Math.max(0, ripple) * 0.2 * motion) * (behindCore ? 0.06 : 1);
+      projected[at + 2] = (0.18 + depth * 0.65) * reveal * (0.7 + Math.sin(t * 0.8 + p.seed * 70) * 0.18 + Math.max(0, ripple) * 0.2 * motion);
       projected[at + 3] = perspective;
     }
     g.save();
@@ -949,11 +954,11 @@ class Orb {
     g.restore();
   }
 
-  drawCore(R, shown, ice, radius) {
-    const { g, cx, cy, t } = this;
-    const phase = -t * ORB_WAVE.speed * ORB_WAVE.number;
+  drawCore(R, shown, ice, radius, cx, cy) {
+    const { g, t } = this;
     g.save();
     g.globalAlpha = shown;
+    g.globalCompositeOperation = 'lighter';
     // The same outward crests as the particle displacement, fading before the cloud's edge.
     if (!REDUCED) {
       g.lineWidth = Math.max(0.6, this.dpr * 0.65);
@@ -967,25 +972,16 @@ class Orb {
         g.stroke();
       }
     }
-    const core = radius * R;
-    const body = g.createRadialGradient(cx - core * 0.32, cy - core * 0.36, 0, cx, cy, core);
-    body.addColorStop(0, 'rgba(133,234,208,.98)');
-    body.addColorStop(0.48, 'rgba(47,147,122,.97)');
-    body.addColorStop(0.88, 'rgba(14,71,59,.97)');
-    body.addColorStop(1, 'rgba(126,239,205,.92)');
-    g.fillStyle = body;
-    g.strokeStyle = rgba(ice, 0.5);
-    g.lineWidth = Math.max(0.7, this.dpr * 0.7);
-    g.beginPath();
-    for (let i = 0; i <= 128; i++) {
-      const angle = i / 128 * Math.PI * 2;
-      const swell = REDUCED ? 0 : Math.sin(angle * 3 + phase * 0.45) * 0.008 + Math.sin(angle * 5 - phase * 0.7) * 0.003;
-      const rr = (radius + swell) * R;
-      g[i ? 'lineTo' : 'moveTo'](cx + Math.cos(angle) * rr, cy + Math.sin(angle) * rr);
-    }
-    g.closePath();
-    g.fill();
-    g.stroke();
+    const glowRadius = radius * R * 3.5;
+    const glow = g.createRadialGradient(cx, cy, 0, cx, cy, glowRadius);
+    glow.addColorStop(0, 'rgba(235,255,247,1)');
+    glow.addColorStop(0.08, 'rgba(215,255,237,.95)');
+    glow.addColorStop(0.2, rgba(ice, 0.7));
+    glow.addColorStop(0.45, rgba(ice, 0.22));
+    glow.addColorStop(0.7, rgba(ice, 0.04));
+    glow.addColorStop(1, rgba(ice, 0));
+    g.fillStyle = glow;
+    g.fillRect(cx - glowRadius, cy - glowRadius, glowRadius * 2, glowRadius * 2);
     g.restore();
   }
 }

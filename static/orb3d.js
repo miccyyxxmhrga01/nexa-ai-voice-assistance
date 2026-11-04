@@ -1,4 +1,4 @@
-/* Nexa's orb: a fluid luminous center, with waves moving a volume of teal particles.
+/* Nexa's orb: a small point of light, with waves moving a volume of teal particles.
    Geometry is seeded once; each frame projects the same cloud with travelling waves and voice
    deformation. WebGL bloom supplies the haze. No libraries or network assets are needed. */
 
@@ -51,7 +51,7 @@ void main() {
   gl_FragColor = vec4(col, 1.0);
 }`,
 
-  // The fluid center and its outward wave crests share the particle field's phase and speed.
+  // A small, edge-free light and outward wave crests sharing the particle field's phase.
   core: `
 #ifdef GL_FRAGMENT_PRECISION_HIGH
 precision highp float;
@@ -71,28 +71,17 @@ void main() {
   vec2 p = (gl_FragCoord.xy - uCenter) / uUnit;
   float d = length(p);
   if (d > 1.2) { gl_FragColor = vec4(0.0); return; }
-  float angle = atan(p.y, p.x);
   float phase = -uTime * uWave.y * uWave.z;
-  float swell = (sin(angle * 3.0 + phase * 0.45) * 0.008 + sin(angle * 5.0 - phase * 0.7) * 0.003) * uMotion;
-  float radius = uRadius + swell;
-  float sd = d - radius;
-  float body = 1.0 - smoothstep(-0.004, 0.006, sd);
-  vec2 q = p / radius;
-  float z = sqrt(max(0.0, 1.0 - dot(q, q)));
-  vec3 normal = normalize(vec3(q, max(0.05, z)));
-  float light = max(0.0, dot(normal, normalize(vec3(-0.4, 0.55, 0.8))));
-  float flow = sin(q.x * 5.0 + q.y * 3.0 + sin(q.y * 4.0 - uTime * 0.6)) * sin(q.y * 6.0 - uTime * 0.8);
-  float rim = exp(-abs(sd) * 190.0);
-  vec3 surface = uTint * (0.15 + light * 0.44 + z * 0.12 + flow * 0.045);
-  surface += vec3(0.32, 0.55, 0.47) * pow(light, 16.0) * 0.42;
-  surface += uTint * rim * 0.38;
-  float halo = exp(-abs(sd) * 18.0) * 0.075;
+  float r = d / max(0.001, uRadius);
+  float hot = exp(-r * r * 6.0);
+  float glow = exp(-r * r * 0.9) * 0.55;
+  float halo = exp(-r * r * 0.13) * 0.1;
   float distance = max(0.0, d - uWave.x);
   float crest = pow(0.5 + 0.5 * sin(distance * uWave.y + phase), 14.0);
   float outward = smoothstep(uWave.x + 0.02, uWave.x + 0.08, d) * (1.0 - smoothstep(0.72, 1.12, d));
   float ripples = crest * outward * 0.035 * uMotion * (1.0 + uEnergy);
-  vec3 color = surface * body + uTint * (halo + ripples);
-  float alpha = body * 0.97 + halo + ripples;
+  vec3 color = (vec3(0.87, 1.0, 0.94) * hot * 1.15 + uTint * (glow + halo + ripples)) * (1.0 + uEnergy * 0.3);
+  float alpha = hot + glow + halo + ripples;
   gl_FragColor = vec4(color * uIntro, min(1.0, alpha) * uIntro);
 }`,
 
@@ -459,7 +448,9 @@ class Orb3D {
     const main = pal.main.map((v, i) => v + (pal.cyan[i] - v) * listen * 0.55);
     const hot = pal.hot;
     const W = this.canvas.width, H = this.canvas.height;
-    const U = this.unit, cx = this.cx, cy = this.cy;
+    const U = this.unit;
+    const sway = orbSpeechMotion(t, L, speak);
+    const cx = this.cx + sway.x * U, cy = this.cy + sway.y * U;
     const pixel = W / Math.max(1, this.canvas.getBoundingClientRect().width);
     const dotScale = Math.max(0.48, Math.min(1.35, U / (240 * pixel))) * pixel;
 
@@ -504,9 +495,7 @@ class Orb3D {
       const px = cx + x1 * perspective * U, py = cy + y1 * perspective * U;
       const reveal = Math.max(0, Math.min(1, (this.intro * 1.45 - p.r * 0.4) / 0.55));
       const twinkle = 0.68 + Math.sin(t * (0.5 + p.seed * 0.8) + p.seed * 70) * 0.18;
-      const screenRadius = Math.hypot(x1, y1) * perspective;
-      const behindCore = screenRadius < coreRadius && z2 < Math.sqrt(Math.max(0, coreRadius * coreRadius - screenRadius * screenRadius));
-      const alpha = Math.min(0.95, ((0.22 + depth * 0.6) * (twinkle + Math.max(0, ripple) * 0.2 * motion) + pulseLight * 0.5 + L * speak * 0.12) * reveal) * (behindCore ? 0.06 : 1);
+      const alpha = Math.min(0.95, ((0.22 + depth * 0.6) * (twinkle + Math.max(0, ripple) * 0.2 * motion) + pulseLight * 0.5 + L * speak * 0.12) * reveal);
       const bright = p.size > 0.82 ? 0.7 : 0.18 + p.seed * 0.3;
       const size = (2.8 + p.size * p.size * 6.8 + Math.max(0, z2) * 1.8) * dotScale * perspective;
       G.sx[i] = px; G.sy[i] = py; G.depth[i] = depth; G.alpha[i] = alpha;
@@ -556,7 +545,7 @@ class Orb3D {
     }
 
     gl.enable(gl.BLEND);
-    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    gl.blendFunc(gl.ONE, light ? gl.ONE_MINUS_SRC_ALPHA : gl.ONE);
     this.quad("core", () => {
       const u = this.u.core;
       gl.uniform2f(u.uCenter, cx, cy);

@@ -179,11 +179,12 @@ searching. Search is enabled by default; it has no visible controls.
 
 ## Her look and sounds
 
-- **Her orb, a cloud of teal light.** A luminous orb sits at the center of thousands of softly
-  glowing particles, joined by fine nearby connections. Smooth waves flow over the center and
-  travel outward, pushing the particles out and letting them settle back. A faint perspective
+- **Her orb, a cloud of teal light.** A small, soft point of light sits at the center of thousands
+  of glowing particles, joined by fine nearby connections. Smooth waves travel outward from
+  the light, pushing the particles out and letting them settle back. A faint perspective
   floor gives it depth. The cloud turns slowly and responds to your voice while listening and
-  hers while speaking; speech strengthens the waves through the particles. Thinking
+  hers while speaking; the light and cloud sway gently and pulse with her speech, then settle
+  back at rest. Speech strengthens the waves through the particles. Thinking
   speeds up the rotation and brightens the connections. The orb settles beneath the display
   when you ask Nexa to show something. It's drawn on the graphics card (WebGL), with a matching
   particle effect on PCs without WebGL, and respects reduced-motion preferences.
