@@ -47,8 +47,16 @@ from owner_voice import OwnerVoice
 
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
-DEFAULT_MODEL = os.environ.get("ASSISTANT_MODEL", "gemma3:1b")
+try:
+    import nexa_config as local_config
+except ModuleNotFoundError as error:
+    if error.name != "nexa_config":
+        raise
+    local_config = None
+
+OLLAMA_URL = os.environ.get("OLLAMA_URL", getattr(local_config, "OLLAMA_URL", "http://127.0.0.1:11434"))
+DEFAULT_MODEL = os.environ.get("ASSISTANT_MODEL", getattr(local_config, "LOCAL_MODEL", "gemma3:1b"))
+ONLINE_BRAIN_ORDER = getattr(local_config, "ONLINE_BRAIN_ORDER", ("groq", "gemini", "claude"))
 # pygame/VPython questions answered on this PC go to this bigger model when it's installed
 # (`ollama pull qwen2.5-coder:7b`); it writes far better code than the 1B, but slowly.
 CODE_MODEL = os.environ.get("CODE_MODEL", "qwen2.5-coder:7b")
@@ -74,7 +82,10 @@ SYSTEM_PROMPT = (
     "Claude) are only engines you run on, so never say a company such as Google, OpenAI, Meta or "
     "Anthropic made you. Talk like a relaxed, "
     "warm friend: casual, natural sentences with contractions, a little humor when it fits, and "
-    "keep it brief. Use Markdown for lists, and write code only when the user asks for it. If "
+    "keep it brief. Sound like someone having a conversation, not reading a formal report. "
+    "Skip stock openings like 'Certainly' and 'As an AI', avoid forced slang, and don't repeat "
+    "the user's title or name in every answer. Use everyday words and match their tone. "
+    "Use Markdown for lists, and write code only when the user asks for it. If "
     "you're unsure, say so instead of guessing. When web search results are provided, rely on "
     "them for current facts. Without them you can't know live information such as news, "
     "weather or prices. Plain PC commands (like 'open Spotify', 'play lofi on YouTube', 'next "
@@ -84,12 +95,53 @@ SYSTEM_PROMPT = (
 )
 VOICE_HINT = (
     " The user is talking to you by voice and your reply will be read aloud, so "
-    "answer in short, natural spoken sentences without Markdown, lists, code or "
+    "answer in one to three relaxed spoken sentences by default, using contractions and "
+    "everyday language, without Markdown, lists, code or "
     "source numbers. Follow the conversation history when the user refers to something "
     "said earlier. Their latest correction replaces the earlier detail. Speech transcripts "
     "can contain mistakes: if a request is incomplete or ambiguous, ask one short "
     "clarifying question. Never invent missing words, names, numbers or intentions."
 )
+DISPLAY_HINT = (
+    " The user explicitly asked to see something on Nexa's display. Give TWO parts, exactly: "
+    "<voice>A short, casual spoken explanation of the main takeaway, one or two sentences. "
+    "Do not read out the screen, URLs, code, or table rows.</voice>\n"
+    "<display># A short, useful title\nThe requested content in Markdown. Use clear paragraphs, "
+    "lists, tables, or fenced code when they help. Show the actual answer, not instructions to "
+    "look elsewhere. Only include facts and sources you have; never invent live data. "
+    "If you cannot get requested data, say so clearly.</display> "
+    "These tags route speech and screen content separately. Do not put the tags in a code fence."
+)
+
+
+def split_display_reply(text: str) -> tuple[str, str]:
+    """Keep presentation markup out of spoken replies, including imperfect local output."""
+    voice = re.search(r"<voice>\s*(.*?)\s*</voice>", text, re.S | re.I)
+    screen = re.search(r"<display>\s*(.*?)(?:</display>|$)", text, re.S | re.I)
+    content = screen.group(1).strip() if screen else re.sub(
+        r"<voice>.*?(?:</voice>|$)", "", text, flags=re.S | re.I
+    ).strip()
+    content = re.sub(r"</?(?:voice|display)>", "", content, flags=re.I).strip()
+    speech = voice.group(1).strip() if voice else "Here you go. I've put it up for you."
+    # A malformed response must never make the TTS read code or a long report.
+    if not speech or len(speech) > 450 or re.search(r"```|<[^>]+>|https?://|\|", speech):
+        speech = "Here you go. I've put it up for you."
+    return speech, content or "I couldn't get the display content. Try asking again."
+
+
+async def display_reply_stream(events):
+    """Preserve status/source events; deliver distinct screen and spoken content."""
+    parts = []
+    async for line in events:
+        event = json.loads(line)
+        if isinstance(event.get("t"), str):
+            parts.append(event["t"])
+        else:
+            yield line
+    if parts:
+        speech, content = split_display_reply("".join(parts))
+        yield json.dumps({"display": {"content": content}}) + "\n"
+        yield json.dumps({"t": speech}) + "\n"
 
 ROOT = Path(__file__).parent
 STATIC_DIR = ROOT / "static"
@@ -985,7 +1037,7 @@ def gemini_label(model_id: str) -> str:
 
 
 def gemini_key() -> str:
-    key = os.environ.get("GEMINI_API_KEY", "").strip()
+    key = (os.environ.get("GEMINI_API_KEY") or getattr(local_config, "GEMINI_API_KEY", "")).strip()
     if key:
         return key
     try:
@@ -1095,7 +1147,7 @@ CLAUDE_MODELS_PATH = NEXA_HOME / "claude_models.json"
 
 
 def claude_key() -> str:
-    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    key = (os.environ.get("ANTHROPIC_API_KEY") or getattr(local_config, "CLAUDE_API_KEY", "")).strip()
     if key:
         return key
     try:
@@ -1190,7 +1242,7 @@ _no_reasoning_effort = set()  # models that rejected reasoning_effort
 
 
 def groq_key() -> str:
-    key = os.environ.get("GROQ_API_KEY", "").strip()
+    key = (os.environ.get("GROQ_API_KEY") or getattr(local_config, "GROQ_API_KEY", "")).strip()
     if key:
         return key
     try:
@@ -1538,7 +1590,7 @@ def code_example(question: str):
 @app.post("/api/chat")
 async def chat(req: Request):
     body = await req.json()
-    model = body.get("model") or DEFAULT_MODEL
+    model = body.get("model") or "auto"
     now = datetime.now().strftime("%A, %B %d, %Y, %I:%M %p")
     # How she addresses the user: "Sir", "Ma'am", "Master", a name, or nothing.
     address = re.sub(r"[^\w .'-]", "", str(body.get("address") or ""))[:40].strip()
@@ -1550,7 +1602,7 @@ async def chat(req: Request):
     # she knows the person she's talking with is the one who made her.
     maker_rule = f" The person you're talking with is {MAKER}, your maker." if (NEXA_HOME / "maker").exists() else ""
     system = f"{SYSTEM_PROMPT}{maker_rule}{address_rule} The current local date and time is {now}." + (
-        VOICE_HINT if body.get("voice") else ""
+        DISPLAY_HINT if body.get("display") is True else VOICE_HINT if body.get("voice") else ""
     )
     history = [
         {"role": m["role"], "content": m["content"]}
@@ -1606,25 +1658,27 @@ async def chat(req: Request):
             # Online brains when possible, in order; anything that goes wrong moves on to
             # the next one, and finally to the local model.
             local_model = DEFAULT_MODEL
+            online = await check_online(max_age=0 if not _online["ok"] else 30)
             if model != "auto":
                 provider, chosen = model.split(":", 1)
-                candidates = [(provider, chosen)]
+                candidates = [(provider, chosen)] if online else []
             else:
-                # The preferred brain first, then the free ones before the paid one.
-                order = ["groq", "gemini", "claude"]
+                # Provider priority lives in code, with no model picker in the app.
+                order = list(dict.fromkeys(p for p in (*ONLINE_BRAIN_ORDER, *BRAINS) if p in BRAINS))
                 prefer = body.get("prefer")
                 if prefer in order:
                     order = [prefer] + [p for p in order if p != prefer]
                 auto = {"groq": auto_groq_models, "gemini": auto_gemini_models, "claude": auto_claude_models}
                 candidates = []
-                for provider in order:
-                    candidates += [(provider, i) for i in await auto[provider](voice=voice)]
+                for provider in order if online else []:
+                    if keys[provider]():
+                        candidates += [(provider, i) for i in await auto[provider](voice=voice)]
             candidates = [(p, i) for p, i in candidates if re.fullmatch(r"[\w./\-]+", i) and keys[p]()]
             problem = ""
-            if not candidates:
-                problem = "no API key is saved"
-            elif not await check_online(max_age=0 if not _online["ok"] else 30):
+            if not online:
                 problem = "you're offline"
+            elif not candidates:
+                problem = "no API key is saved"
             skipped = set()  # providers that are resting, rate-limited or rejected the key
             for provider, model_id in [] if problem else candidates:
                 if provider in skipped:
@@ -1644,7 +1698,9 @@ async def chat(req: Request):
                             yield json.dumps({"brain": f"✦ {label}"}) + "\n"
                         answered = True
                         yield json.dumps({"t": text}) + "\n"
-                    return
+                    if answered:
+                        return
+                    problem = f"{label} returned no answer"
                 except (BrainError, httpx.HTTPError, ValueError) as e:
                     log(f"{provider} {model_id}: {str(e)[:200]}")
                     status = e.status if isinstance(e, BrainError) else 0
@@ -1726,7 +1782,8 @@ async def chat(req: Request):
                 {"error": "Ollama isn't running. Open Ollama from the Start menu, then try again."}
             ) + "\n"
 
-    return StreamingResponse(stream(), media_type="application/x-ndjson")
+    events = display_reply_stream(stream()) if body.get("display") is True else stream()
+    return StreamingResponse(events, media_type="application/x-ndjson")
 
 
 _device_locks = {"cpu": threading.Lock(), "cuda": threading.Lock()}
@@ -1769,13 +1826,13 @@ async def owner_enroll(req: Request):
             return JSONResponse({"error": "Voice samples are too long."}, status_code=413)
     try:
         samples = json.loads(raw).get("samples")
-        if not isinstance(samples, list) or len(samples) != 3:
-            raise ValueError("Record all three voice samples.")
+        if not isinstance(samples, list) or not 1 <= len(samples) <= 3:
+            raise ValueError("Record one short voice sample.")
         recordings = []
         for sample in samples:
             pcm = base64.b64decode(sample, validate=True)
-            if len(pcm) % 2 or not 3 * SAMPLE_RATE * 2 <= len(pcm) <= 20 * SAMPLE_RATE * 2:
-                raise ValueError("Each sample must be between 3 and 20 seconds.")
+            if len(pcm) % 2 or not 2 * SAMPLE_RATE * 2 <= len(pcm) <= 20 * SAMPLE_RATE * 2:
+                raise ValueError("Please record a sentence between 2 and 20 seconds long.")
             recordings.append(louder(np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768.0))
         await run_in_threadpool(owner_voice.enroll, recordings)
         return owner_voice.status()

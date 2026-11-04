@@ -8,7 +8,7 @@
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
-$files = "server.py", "owner_voice.py", "requirements.txt", "setup.ps1", "start.bat", "README.md", "static"
+$files = "server.py", "owner_voice.py", "nexa_config.example.py", "requirements.txt", "setup.ps1", "start.bat", "README.md", "static"
 $stage = Join-Path $PSScriptRoot "dist\Nexa"
 $zip = Join-Path $PSScriptRoot "dist\Nexa.zip"
 $payload = Join-Path $PSScriptRoot "dist\payload.zip"

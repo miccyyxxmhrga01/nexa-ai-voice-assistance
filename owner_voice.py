@@ -92,13 +92,29 @@ class OwnerVoice:
             raise ValueError("Please speak a longer phrase.")
         return self._normalize(extractor.compute(stream))
 
+    @staticmethod
+    def _windows(speech):
+        """Check the whole recording and shorter spans for a consistent speaker."""
+        windows = [speech]
+        # Two-second crops produce unreliable embeddings even for the same
+        # speaker. Short requests use their full recording; longer ones also
+        # check overlapping four-second spans for a speaker change.
+        width, step = SAMPLE_RATE * 4, SAMPLE_RATE * 2
+        if len(speech) > width:
+            starts = list(range(0, len(speech) - width + 1, step))
+            starts.append(len(speech) - width)
+            windows.extend(speech[start:start + width] for start in sorted(set(starts)))
+        return windows
+
     def enroll(self, recordings):
-        if len(recordings) != 3:
-            raise ValueError("Record all three voice samples.")
+        # Older app windows can still submit their three recordings.
+        if not 1 <= len(recordings) <= 3:
+            raise ValueError("Record one short voice sample.")
         with self._lock:
-            vectors = [self._embedding(self._speech(audio, minimum=3)) for audio in recordings]
+            vectors = [self._embedding(window) for audio in recordings
+                       for window in self._windows(self._speech(audio, minimum=2))]
             if any(float(a @ b) < MATCH_THRESHOLD for i, a in enumerate(vectors) for b in vectors[i + 1:]):
-                raise ValueError("The samples don't sound like the same speaker. Record all three again in a quiet room.")
+                raise ValueError("I heard more than one voice. Record the sentence again in a quiet room.")
             profile = {
                 "version": 1, "model": MODEL_NAME,
                 "embedding": self._normalize(np.mean(vectors, axis=0)).tolist(),
@@ -132,13 +148,7 @@ class OwnerVoice:
                 owner = self._normalize(profile["embedding"])
                 # Check the full phrase and overlapping windows, so a matching greeting
                 # doesn't automatically admit a different speaker's following command.
-                windows = [speech]
-                width, step = SAMPLE_RATE * 2, SAMPLE_RATE
-                if len(speech) > width:
-                    starts = list(range(0, len(speech) - width + 1, step))
-                    starts.append(len(speech) - width)
-                    windows.extend(speech[start:start + width] for start in sorted(set(starts)))
-                for window in windows:
+                for window in self._windows(speech):
                     vector = self._embedding(window)
                     if vector.shape != owner.shape:
                         return False, "unavailable"

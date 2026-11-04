@@ -3,265 +3,34 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111c1a">
   <title>Nexa</title>
   <link rel="icon" type="image/x-icon" href="/static/nexa.ico?v=nexa-3">
-  <meta name="theme-color" content="#050f0b">
-  <link rel="stylesheet" href="/static/style.css?v=nexa-7">
+  <link rel="stylesheet" href="/static/style.css?v=nexa-particles-1">
 </head>
 <body>
-  <!-- Magicules: drifting motes of light behind everything; they stir when she hears or speaks. -->
-  <canvas id="magicules" class="magicules" aria-hidden="true"></canvas>
-
-  <header class="topbar">
-    <div class="brand">
-      <button id="menuBtn" class="icon-btn" title="Chats" aria-label="Saved chats" aria-expanded="false">
-        <svg class="i" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9.5 4v16M5.8 8.5h1.4M5.8 11.5h1.4"/></svg>
-      </button>
-      <span class="emblem-mini" aria-hidden="true"></span>
-      <span class="brand-name">Nexa</span>
-      <select id="model" class="model-select" title="Model" aria-label="Model"></select>
-    </div>
-    <div class="top-actions">
-      <span id="status" class="status" title="Connection status"></span>
-      <button id="wakeBtn" class="wake-btn" aria-pressed="false" title="Answer when I hear my name">
-        <span class="wake-dot" aria-hidden="true"></span>Hey Nexa
-      </button>
-      <button id="speakToggle" class="icon-btn" title="Read replies aloud" aria-pressed="false" aria-label="Read replies aloud">
-        <svg class="i" viewBox="0 0 24 24"><path d="M11 5 6.5 9H4a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1h2.5l4.5 4z"/><path class="waves" d="M15.5 9a4.5 4.5 0 0 1 0 6M18.5 6.2a8.5 8.5 0 0 1 0 11.6"/></svg>
-      </button>
-      <button id="settingsBtn" class="icon-btn" title="Settings" aria-label="Settings" aria-expanded="false">
-        <svg class="i" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2.2"/><circle cx="9" cy="17" r="2.2"/></svg>
-      </button>
-      <button id="newChat" class="icon-btn" title="New chat" aria-label="New chat">
-        <svg class="i" viewBox="0 0 24 24"><path d="M20 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5"/><path d="M17.4 3.6a2 2 0 0 1 2.9 2.9l-7.6 7.6-3.7.9.9-3.7z"/></svg>
-      </button>
-    </div>
-  </header>
-
-  <div id="settings" class="settings-modal" hidden role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
-    <div class="settings-card">
-      <header class="settings-head">
-        <h2 id="settingsTitle">Settings</h2>
-        <button type="button" id="settingsClose" class="icon-btn" aria-label="Close settings">
-          <svg class="i" viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg>
+  <main class="orb-scene" aria-label="Nexa voice assistant">
+    <canvas id="orb" class="orb-world" tabindex="0" role="button" aria-label="Talk to Nexa. Press Escape to end a conversation."></canvas>
+    <div id="orbSpot" class="orb-spot" aria-hidden="true"></div>
+    <section id="hud" class="hud" hidden aria-labelledby="hudTitle" aria-busy="false">
+      <div class="hud-signal" aria-hidden="true"><span></span></div>
+      <header class="hud-head">
+        <div class="hud-channel"><span class="hud-mark" aria-hidden="true"></span>Nexa<span class="hud-divider" aria-hidden="true">/</span>Visual channel</div>
+        <button id="hudClose" class="hud-close" type="button" aria-label="Hide display" title="Hide display">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"/></svg>
         </button>
       </header>
-      <nav class="settings-tabs" role="tablist">
-        <button type="button" role="tab" data-tab="general" aria-selected="true">General</button>
-        <button type="button" role="tab" data-tab="voice" aria-selected="false">Voice</button>
-        <button type="button" role="tab" data-tab="brains" aria-selected="false">AI brains</button>
-      </nav>
-
-      <div class="settings-body">
-        <section data-panel="general">
-          <div class="setting">
-            <div class="setting-text"><h3>How Nexa addresses you</h3>
-              <p>Auto guesses Sir or Ma'am from your voice and can be wrong; pick one if it is.</p></div>
-            <select id="addressSel">
-              <option value="auto">Auto (by voice)</option>
-              <option value="Sir">Sir</option>
-              <option value="Ma'am">Ma'am</option>
-              <option value="Master">Master</option>
-              <option value="name">My name…</option>
-              <option value="none">No title</option>
-            </select>
-          </div>
-          <input id="addressName" class="name-input" type="text" placeholder="Your name" maxlength="30" autocomplete="off" hidden>
-          <div class="owner-voice">
-            <h3>Owner voice</h3>
-            <p>Nexa checks your voice before answering spoken requests. Enroll in a quiet room using your usual microphone.</p>
-            <p id="ownerState" role="status" aria-live="polite">Checking voice enrollment…</p>
-            <p id="ownerPrompt" class="owner-prompt" hidden></p>
-            <div class="key-row">
-              <button type="button" id="ownerEnroll" class="key-btn">Enroll my voice</button>
-              <button type="button" id="ownerCancel" class="quit-btn" hidden>Cancel</button>
-              <button type="button" id="ownerRemove" class="quit-btn" hidden>Remove voice</button>
-            </div>
-            <p>Only a voice profile stays on this PC; recordings are discarded. Recordings or cloned voices may still pass this check.</p>
-          </div>
-          <div class="setting">
-            <div class="setting-text"><h3>Hearing</h3>
-              <p>Accurate uses the larger speech model and may take longer. Fast uses the smaller model.</p></div>
-            <div class="seg" id="hearingSeg">
-              <button type="button" data-v="accurate">Accurate</button>
-              <button type="button" data-v="fast">Fast</button>
-            </div>
-          </div>
-          <div class="setting">
-            <div class="setting-text"><h3>Quit Nexa</h3>
-              <p>Stops her completely. Closing her window keeps her running; open her again from the Nexa shortcut.</p></div>
-            <button type="button" id="quitBtn" class="quit-btn">Quit</button>
-          </div>
-          <div class="about">
-            <span class="about-mark" aria-hidden="true"></span>
-            <div><h3>NEXA</h3><p>Made by Mic Dahryl Caybin · Version 1.0</p></div>
-          </div>
-        </section>
-
-        <section data-panel="voice" hidden>
-          <div class="setting">
-            <div class="setting-text"><h3>Voice</h3><p>Offline voices installed on this PC.</p></div>
-            <select id="voiceSel"></select>
-          </div>
-          <div class="setting">
-            <div class="setting-text"><h3>Speaking style</h3><p>Calm is even and steady; Natural is more expressive.</p></div>
-            <div class="seg" id="styleSeg">
-              <button type="button" data-v="calm">Calm</button>
-              <button type="button" data-v="natural">Natural</button>
-            </div>
-          </div>
-          <div class="setting">
-            <div class="setting-text"><h3>Inner-voice echo</h3><p>A soft echo, as if she speaks inside your head.</p></div>
-            <div class="seg" id="echoSeg">
-              <button type="button" data-v="0">Off</button>
-              <button type="button" data-v="1">Subtle</button>
-              <button type="button" data-v="2">Strong</button>
-            </div>
-          </div>
-          <div class="setting">
-            <div class="setting-text"><h3>Sound effects</h3><p>Soft chimes when she hears you, speaks and searches.</p></div>
-            <div class="seg" id="sfxSeg">
-              <button type="button" data-v="1">On</button>
-              <button type="button" data-v="0">Off</button>
-            </div>
-          </div>
-          <button type="button" id="previewVoice" class="preview"><svg class="i" viewBox="0 0 24 24"><path d="M8 5.8v12.4a.8.8 0 0 0 1.2.7l9.6-6.2a.8.8 0 0 0 0-1.4L9.2 5.1a.8.8 0 0 0-1.2.7z"/></svg><span>Hear Nexa</span></button>
-        </section>
-
-        <section data-panel="brains" hidden>
-          <p class="panel-intro">Nexa always works offline with Gemma on this PC. Add an online brain for smarter
-            answers when you're connected; Auto switches back to Gemma by itself.</p>
-          <div class="setting" id="preferField" hidden>
-            <div class="setting-text"><h3>Auto uses first</h3><p>The others are the backups.</p></div>
-            <div class="seg" id="preferSeg">
-              <button type="button" data-v="groq">Groq</button>
-              <button type="button" data-v="gemini">Gemini</button>
-              <button type="button" data-v="claude">Claude</button>
-            </div>
-          </div>
-          <div class="brain-card">
-            <div class="brain-head"><h3>Groq</h3><span class="badge" id="groqBadge">Not set up</span></div>
-            <p id="groqState" class="field-note">Not set up.</p>
-            <div class="key-row">
-              <input id="groqKey" type="password" placeholder="Paste your Groq API key" autocomplete="off" spellcheck="false" aria-label="Groq API key">
-              <button type="button" id="groqSave" class="key-btn">Save</button>
-            </div>
-            <p class="field-note">Free and very fast; Groq keeps nothing you send by default. Get a key at
-              <a href="https://console.groq.com/keys" target="_blank" rel="noopener noreferrer">console.groq.com/keys</a>.
-              <button type="button" id="groqRemove" class="link-btn" hidden>Remove key</button></p>
-          </div>
-          <div class="brain-card">
-            <div class="brain-head"><h3>Claude</h3><span class="badge" id="claudeBadge">Not set up</span></div>
-            <p id="claudeState" class="field-note">Not set up.</p>
-            <div class="key-row">
-              <input id="claudeKey" type="password" placeholder="Paste your Claude API key" autocomplete="off" spellcheck="false" aria-label="Claude API key">
-              <button type="button" id="claudeSave" class="key-btn">Save</button>
-            </div>
-            <p class="field-note">Paid, pay-as-you-go. Get a key at
-              <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer">console.anthropic.com</a>.
-              <button type="button" id="claudeRemove" class="link-btn" hidden>Remove key</button></p>
-          </div>
-          <div class="brain-card">
-            <div class="brain-head"><h3>Gemini</h3><span class="badge" id="geminiBadge">Not set up</span></div>
-            <p id="geminiState" class="field-note">Not set up.</p>
-            <div class="key-row">
-              <input id="geminiKey" type="password" placeholder="Paste your Gemini API key" autocomplete="off" spellcheck="false" aria-label="Gemini API key">
-              <button type="button" id="geminiSave" class="key-btn">Save</button>
-            </div>
-            <p class="field-note">Free tier with a daily limit; Google may use what you send. Get a key at
-              <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer">aistudio.google.com</a>.
-              <button type="button" id="geminiRemove" class="link-btn" hidden>Remove key</button></p>
-          </div>
-          <p class="field-note">Keys stay on this PC and are never stored in the project files.</p>
-        </section>
-      </div>
-    </div>
-  </div>
-
-  <aside id="sidebar" class="sidebar" aria-label="Saved chats">
-    <div class="side-head">
-      <span class="side-title">Chats</span>
-      <button type="button" id="sideNew" class="side-new"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>New chat</span></button>
-    </div>
-    <nav id="chatList" class="chat-list"></nav>
-    <p class="side-note">Saved on this PC only.</p>
-  </aside>
-  <div id="scrim" class="scrim" hidden></div>
-
-  <div id="banner" class="banner" hidden></div>
-
-  <main id="chat" class="chat">
-    <section id="welcome" class="welcome">
-      <div class="orb-stage">
-        <div class="orb-halo" aria-hidden="true"></div>
-        <canvas id="heroOrb" class="hero-orb" aria-hidden="true"></canvas>
-      </div>
-      <p class="eyebrow">A little space for your next big idea</p>
-      <h1><span id="greeting" class="gradient-text">Hello</span></h1>
-      <p class="sub">What shall we explore?</p>
-      <p class="hint">Type a thought, or say <strong>“Hey Nexa”</strong></p>
-      <div class="chips">
-        <button class="chip"><span class="chip-icon" aria-hidden="true"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.8v2M12 19.2v2M5.5 5.5l1.4 1.4M17.1 17.1l1.4 1.4M2.8 12h2M19.2 12h2M5.5 18.5l1.4-1.4M17.1 6.9l1.4-1.4"/></svg></span><span class="chip-label">Plan my day</span><span class="chip-prompt">What's the weather today?</span><span class="chip-arrow" aria-hidden="true"><svg class="i" viewBox="0 0 24 24"><path d="M7 17 17 7M9 7h8v8"/></svg></span></button>
-        <button class="chip"><span class="chip-icon" aria-hidden="true"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2.2 4.8-4.8 2.2 2.2-4.8z"/></svg></span><span class="chip-label">Discover something</span><span class="chip-prompt">What's the latest tech news?</span><span class="chip-arrow" aria-hidden="true"><svg class="i" viewBox="0 0 24 24"><path d="M7 17 17 7M9 7h8v8"/></svg></span></button>
-        <button class="chip"><span class="chip-icon" aria-hidden="true"><svg class="i" viewBox="0 0 24 24"><path d="M11 3.5l1.7 4.8 4.8 1.7-4.8 1.7L11 16.5l-1.7-4.8L4.5 10l4.8-1.7z"/><path d="M18.5 14.5v5M16 17h5"/></svg></span><span class="chip-label">Make something</span><span class="chip-prompt">Write a short poem about the ocean</span><span class="chip-arrow" aria-hidden="true"><svg class="i" viewBox="0 0 24 24"><path d="M7 17 17 7M9 7h8v8"/></svg></span></button>
-        <button class="chip"><span class="chip-icon" aria-hidden="true"><svg class="i" viewBox="0 0 24 24"><path d="m8 7.5-4.5 4.5L8 16.5M16 7.5l4.5 4.5-4.5 4.5M13.5 5l-3 14"/></svg></span><span class="chip-label">Work through it</span><span class="chip-prompt">Write a Python function to reverse a string</span><span class="chip-arrow" aria-hidden="true"><svg class="i" viewBox="0 0 24 24"><path d="M7 17 17 7M9 7h8v8"/></svg></span></button>
-      </div>
+      <h1 id="hudTitle" class="hud-title"></h1>
+      <div class="hud-loading" aria-hidden="true"><i></i><i></i><i></i></div>
+      <div id="hudBody" class="hud-body" tabindex="0" aria-label="Requested content"></div>
+      <footer class="hud-foot">
+        <span id="hudStatus" class="hud-status" role="status" aria-live="polite"></span>
+        <nav id="hudSources" class="hud-sources" hidden aria-label="Sources"></nav>
+      </footer>
     </section>
-    <div id="messages" class="messages"></div>
   </main>
-
-  <footer class="composer-wrap">
-    <button type="button" id="toBottom" class="to-bottom" hidden aria-label="Jump to the newest message">
-      <svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6"/></svg>
-    </button>
-    <form id="composer" class="composer">
-      <textarea id="input" rows="1" placeholder="Ask Nexa" aria-label="Message"></textarea>
-      <div class="composer-actions">
-        <button type="button" id="webBtn" class="tool-chip" aria-pressed="true" title="Search the web when online">
-          <svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3.5 9h17M3.5 15h17M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
-          <span>Web</span>
-        </button>
-        <button type="button" id="micBtn" class="icon-btn" title="Speak" aria-label="Speak">
-          <svg class="i" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11.5" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M9 21h6"/></svg>
-        </button>
-        <button type="button" id="liveBtn" class="icon-btn" title="Talk with Nexa" aria-label="Talk with Nexa">
-          <svg class="i" viewBox="0 0 24 24"><path d="M3.5 10.5v3M7.5 7v10M12 3.5v17M16.5 7v10M20.5 10.5v3"/></svg>
-        </button>
-        <button type="submit" id="sendBtn" class="send-btn" title="Send" aria-label="Send">
-          <svg class="i i-send" viewBox="0 0 24 24"><path d="M12 19V5M5.5 11.5 12 5l6.5 6.5"/></svg>
-          <svg class="i-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2.5"/></svg>
-        </button>
-      </div>
-    </form>
-    <p id="footnote" class="footnote">Nexa by Mic Dahryl Caybin runs on your computer, searches the web when online, and can make mistakes.</p>
-  </footer>
-
-  <!-- Voice session: Nexa's orb, with subtitles. -->
-  <div id="live" class="live" hidden>
-    <div class="aurora" aria-hidden="true"></div>
-    <!-- The 3D orb and its deep green background fill the screen. -->
-    <canvas id="orb" class="orb-world" aria-hidden="true"></canvas>
-    <div class="hud"><span class="hud-mark" aria-hidden="true"></span><span class="hud-brand">NEXA</span><span class="voice-label">Voice conversation</span></div>
-    <span class="live-escape">Press <kbd>Esc</kbd> to return</span>
-    <button type="button" id="orbSpot" class="orb-spot" title="Tap to interrupt" aria-label="Interrupt Nexa"></button>
-    <div class="orb-state" role="status" aria-live="polite"><span class="state-dot" aria-hidden="true"></span><span id="liveState">LISTENING</span></div>
-    <p class="orb-caption" id="orbCaption">I'm here. Take your time.</p>
-    <div class="subs" aria-live="polite">
-      <p id="subYou" class="sub you"></p>
-      <p id="subNexa" class="sub nexa"></p>
-    </div>
-    <div class="live-controls">
-      <button id="liveInterrupt" class="pill"><svg class="i" viewBox="0 0 24 24"><path d="M9 6.5v11M15 6.5v11"/></svg><span>Interrupt</span></button>
-      <button id="liveEnd" class="pill end"><svg class="i" viewBox="0 0 24 24"><path d="M7 7l10 10M17 7 7 17"/></svg><span>End conversation</span></button>
-    </div>
-  </div>
-
-  <!-- Nexa's icon: appears in the corner whenever she speaks. -->
-  <canvas id="emblem" class="emblem" aria-hidden="true"></canvas>
-
-  <div id="toast" class="toast" role="status" aria-live="polite"></div>
-
-  <script src="/static/orb3d.js?v=nexa-4"></script>
-  <script src="/static/app.js?v=nexa-8"></script>
+  <script src="/static/orb3d.js?v=nexa-particles-1"></script>
+  <script src="/static/hud.js?v=nexa-hud-1"></script>
+  <script src="/static/app.js?v=nexa-particles-1"></script>
 </body>
 </html>

@@ -20,6 +20,7 @@ training/out/
 training/tools/
 
 # Local secrets
+nexa_config.py
 .env
 .env.*
 !.env.example
