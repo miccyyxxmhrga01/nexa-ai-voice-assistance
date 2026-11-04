@@ -51,7 +51,7 @@ void main() {
   gl_FragColor = vec4(col, 1.0);
 }`,
 
-  // A small, edge-free light and outward wave crests sharing the particle field's phase.
+  // The small light stays intact; its wave overlay is a set of rotating holographic arcs.
   core: `
 #ifdef GL_FRAGMENT_PRECISION_HIGH
 precision highp float;
@@ -66,22 +66,38 @@ uniform float uRadius;
 uniform float uMotion;
 uniform float uEnergy;
 uniform vec3 uTint;
-uniform vec4 uWave;
+float radialLine(float d, float radius, float width) {
+  float x = (d - radius) / width;
+  return exp(-x * x);
+}
+float arcMask(float angle, float count, float on, float phase) {
+  float cell = fract(angle * count + phase);
+  return smoothstep(0.015, 0.045, cell) * (1.0 - smoothstep(on - 0.03, on, cell));
+}
 void main() {
   vec2 p = (gl_FragCoord.xy - uCenter) / uUnit;
   float d = length(p);
   if (d > 1.2) { gl_FragColor = vec4(0.0); return; }
-  float phase = -uTime * uWave.y * uWave.z;
   float r = d / max(0.001, uRadius);
   float hot = exp(-r * r * 6.0);
   float glow = exp(-r * r * 0.9) * 0.55;
   float halo = exp(-r * r * 0.13) * 0.1;
-  float distance = max(0.0, d - uWave.x);
-  float crest = pow(0.5 + 0.5 * sin(distance * uWave.y + phase), 14.0);
-  float outward = smoothstep(uWave.x + 0.02, uWave.x + 0.08, d) * (1.0 - smoothstep(0.72, 1.12, d));
-  float ripples = crest * outward * 0.035 * uMotion * (1.0 + uEnergy);
-  vec3 color = (vec3(0.87, 1.0, 0.94) * hot * 1.15 + uTint * (glow + halo + ripples)) * (1.0 + uEnergy * 0.3);
-  float alpha = hot + glow + halo + ripples;
+  float angle = atan(p.y, p.x) / 6.2831853;
+  float clock = uTime * uMotion;
+  float arcs = radialLine(d, 0.23, 0.0025) * arcMask(angle, 3.0, 0.68, clock * 0.21) * 0.24;
+  arcs += radialLine(d, 0.38, 0.002) * arcMask(angle, 4.0, 0.76, -clock * 0.25) * 0.16;
+  arcs += radialLine(d, 0.56, 0.0032) * arcMask(angle, 3.0, 0.52, clock * 0.16) * 0.22;
+  arcs += radialLine(d, 0.7, 0.0012) * arcMask(angle, 24.0, 0.58, -clock * 0.32) * 0.07;
+  float ticks = arcMask(angle, 96.0, 0.19, clock * 0.28);
+  float tickBand = smoothstep(0.778, 0.781, d) * (1.0 - smoothstep(0.803, 0.806, d));
+  float majorTicks = arcMask(angle, 12.0, 0.025, clock * 0.035);
+  float majorBand = smoothstep(0.758, 0.761, d) * (1.0 - smoothstep(0.807, 0.81, d));
+  arcs += (ticks * tickBand + majorTicks * majorBand) * 0.16;
+  float scanAngle = fract(angle - clock * 0.075 + 0.5) - 0.5;
+  float scan = exp(-scanAngle * scanAngle * 1200.0) * smoothstep(0.27, 0.3, d) * (1.0 - smoothstep(0.7, 0.74, d));
+  float hologram = (arcs + scan * 0.06) * (1.0 + uEnergy * 0.55);
+  vec3 color = (vec3(0.87, 1.0, 0.94) * hot * 1.15 + uTint * (glow + halo + hologram)) * (1.0 + uEnergy * 0.3);
+  float alpha = hot + glow + halo + hologram;
   gl_FragColor = vec4(color * uIntro, min(1.0, alpha) * uIntro);
 }`,
 
@@ -270,7 +286,7 @@ class Orb3D {
     };
     this.u = {
       backdrop: uniforms(progs.backdrop, ["uRes", "uCenter", "uUnit", "uTime", "uMood", "uIntro"]),
-      core: uniforms(progs.core, ["uCenter", "uUnit", "uTime", "uIntro", "uRadius", "uMotion", "uEnergy", "uTint", "uWave"]),
+      core: uniforms(progs.core, ["uCenter", "uUnit", "uTime", "uIntro", "uRadius", "uMotion", "uEnergy", "uTint"]),
       line: uniforms(progs.line, ["uRes", "uGlow"]),
       dot: uniforms(progs.dot, ["uRes"]),
       bright: uniforms(progs.bright, ["uTex", "uCut"]),
@@ -556,7 +572,6 @@ class Orb3D {
       gl.uniform1f(u.uMotion, motion);
       gl.uniform1f(u.uEnergy, L * (listen + speak));
       gl.uniform3f(u.uTint, main[0], main[1], main[2]);
-      gl.uniform4f(u.uWave, ORB_WAVE.core, ORB_WAVE.number, ORB_WAVE.speed, ORB_WAVE.amplitude);
     });
     if (light) gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     else gl.blendFunc(gl.ONE, gl.ONE);

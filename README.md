@@ -180,8 +180,8 @@ searching. Search is enabled by default; it has no visible controls.
 ## Her look and sounds
 
 - **Her orb, a cloud of teal light.** A small, soft point of light sits at the center of thousands
-  of glowing particles, joined by fine nearby connections. Smooth waves travel outward from
-  the light, pushing the particles out and letting them settle back. A faint perspective
+  of glowing particles, joined by fine nearby connections. Segmented holographic arcs rotate
+  in opposite directions, with fine radial ticks and a soft scanning sweep. A faint perspective
   floor gives it depth. The cloud turns slowly and responds to your voice while listening and
   hers while speaking; the light and cloud sway gently and pulse with her speech, then settle
   back at rest. Speech strengthens the waves through the particles. Thinking

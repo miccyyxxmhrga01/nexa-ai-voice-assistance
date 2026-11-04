@@ -732,7 +732,7 @@ async function transcribe(pcm, purpose = "", quality = "fast") {
 
 /* ---------- Drawing helpers for the orb ---------- */
 
-// One travelling wave field drives the center, its visible ripples and both particle renderers.
+// The particle field retains its gentle wave motion beneath the holographic ring overlay.
 const ORB_WAVE = { core: 0.065, number: Math.PI * 2 / 0.42, speed: 0.24, amplitude: 0.038 };
 function orbWaveAt(radius, time) {
   const distance = Math.max(0, radius - ORB_WAVE.core);
@@ -959,19 +959,36 @@ class Orb {
     g.save();
     g.globalAlpha = shown;
     g.globalCompositeOperation = 'lighter';
-    // The same outward crests as the particle displacement, fading before the cloud's edge.
-    if (!REDUCED) {
-      g.lineWidth = Math.max(0.6, this.dpr * 0.65);
-      for (let i = 0; i < 3; i++) {
-        const crest = (t * ORB_WAVE.speed + 0.105) % 0.42 + i * 0.42;
-        const rr = ORB_WAVE.core + crest;
-        const fade = Math.min(1, crest / 0.08) * Math.max(0, Math.min(1, (1.12 - rr) / 0.4));
-        g.strokeStyle = rgba(ice, fade * 0.055);
+    // Counter-rotating arcs replace only the old outward wave overlay.
+    const clock = REDUCED ? 0 : t, tau = Math.PI * 2;
+    const energy = this.level * (this.listenAmt + this.speakAmt);
+    g.save();
+    g.translate(cx, cy);
+    g.scale(1, -1);
+    for (const [r, count, on, rate, width, alpha] of [
+      [0.23, 3, 0.68, 0.21, 0.0025, 0.24], [0.38, 4, 0.76, -0.25, 0.002, 0.16],
+      [0.56, 3, 0.52, 0.16, 0.0032, 0.22], [0.7, 24, 0.58, -0.32, 0.0012, 0.07],
+    ]) {
+      g.lineWidth = Math.max(this.dpr * 0.55, width * R * 1.7);
+      g.strokeStyle = rgba(ice, alpha * (1 + energy * 0.55));
+      for (let i = 0; i < count; i++) {
+        const start = (i - clock * rate + 0.03) * tau / count;
         g.beginPath();
-        g.arc(cx, cy, rr * R, 0, Math.PI * 2);
+        g.arc(0, 0, r * R, start, start + (on - 0.06) * tau / count);
         g.stroke();
       }
     }
+    g.lineWidth = Math.max(this.dpr * 0.55, R * 0.0015);
+    g.strokeStyle = rgba(ice, 0.16 * (1 + energy * 0.55));
+    g.beginPath();
+    for (let i = 0; i < 96; i++) {
+      const angle = (i - clock * 0.28) * tau / 96;
+      const inner = i % 8 === 0 ? 0.76 : 0.78;
+      g.moveTo(Math.cos(angle) * R * inner, Math.sin(angle) * R * inner);
+      g.lineTo(Math.cos(angle) * R * 0.806, Math.sin(angle) * R * 0.806);
+    }
+    g.stroke();
+    g.restore();
     const glowRadius = radius * R * 3.5;
     const glow = g.createRadialGradient(cx, cy, 0, cx, cy, glowRadius);
     glow.addColorStop(0, 'rgba(235,255,247,1)');
