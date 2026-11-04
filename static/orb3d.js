@@ -1,5 +1,5 @@
-/* Nexa's orb: a softly lit volume of teal particles and short, fine connections.
-   Geometry is seeded once; each frame projects the same cloud with gentle drift and voice
+/* Nexa's orb: a fluid luminous center, with waves moving a volume of teal particles.
+   Geometry is seeded once; each frame projects the same cloud with travelling waves and voice
    deformation. WebGL bloom supplies the haze. No libraries or network assets are needed. */
 
 const ORB_PALETTES = {
@@ -49,6 +49,51 @@ void main() {
   vec2 v = gl_FragCoord.xy / uRes - 0.5;
   col *= 1.0 - dot(v, v) * 0.55;
   gl_FragColor = vec4(col, 1.0);
+}`,
+
+  // The fluid center and its outward wave crests share the particle field's phase and speed.
+  core: `
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
+precision mediump float;
+#endif
+uniform vec2 uCenter;
+uniform float uUnit;
+uniform float uTime;
+uniform float uIntro;
+uniform float uRadius;
+uniform float uMotion;
+uniform float uEnergy;
+uniform vec3 uTint;
+uniform vec4 uWave;
+void main() {
+  vec2 p = (gl_FragCoord.xy - uCenter) / uUnit;
+  float d = length(p);
+  if (d > 1.2) { gl_FragColor = vec4(0.0); return; }
+  float angle = atan(p.y, p.x);
+  float phase = -uTime * uWave.y * uWave.z;
+  float swell = (sin(angle * 3.0 + phase * 0.45) * 0.008 + sin(angle * 5.0 - phase * 0.7) * 0.003) * uMotion;
+  float radius = uRadius + swell;
+  float sd = d - radius;
+  float body = 1.0 - smoothstep(-0.004, 0.006, sd);
+  vec2 q = p / radius;
+  float z = sqrt(max(0.0, 1.0 - dot(q, q)));
+  vec3 normal = normalize(vec3(q, max(0.05, z)));
+  float light = max(0.0, dot(normal, normalize(vec3(-0.4, 0.55, 0.8))));
+  float flow = sin(q.x * 5.0 + q.y * 3.0 + sin(q.y * 4.0 - uTime * 0.6)) * sin(q.y * 6.0 - uTime * 0.8);
+  float rim = exp(-abs(sd) * 190.0);
+  vec3 surface = uTint * (0.15 + light * 0.44 + z * 0.12 + flow * 0.045);
+  surface += vec3(0.32, 0.55, 0.47) * pow(light, 16.0) * 0.42;
+  surface += uTint * rim * 0.38;
+  float halo = exp(-abs(sd) * 18.0) * 0.075;
+  float distance = max(0.0, d - uWave.x);
+  float crest = pow(0.5 + 0.5 * sin(distance * uWave.y + phase), 14.0);
+  float outward = smoothstep(uWave.x + 0.02, uWave.x + 0.08, d) * (1.0 - smoothstep(0.72, 1.12, d));
+  float ripples = crest * outward * 0.035 * uMotion * (1.0 + uEnergy);
+  vec3 color = surface * body + uTint * (halo + ripples);
+  float alpha = body * 0.97 + halo + ripples;
+  gl_FragColor = vec4(color * uIntro, min(1.0, alpha) * uIntro);
 }`,
 
   // Threads are soft quads: a thin bright core with a wide glow around it.
@@ -170,6 +215,7 @@ class Orb3D {
     const G = ORB_GLSL;
     return {
       backdrop: link(G.quad, G.backdrop),
+      core: link(G.quad, G.core),
       line: link(G.lineVert, G.lineFrag),
       dot: link(G.dotVert, G.dotFrag),
       bright: link(G.quad, G.bright),
@@ -229,12 +275,13 @@ class Orb3D {
     const progs = this.progs = Orb3D.compile(gl);
     const uniforms = (p, names) => Object.fromEntries(names.map((n) => [n, gl.getUniformLocation(p, n)]));
     this.loc = {
-      quad: Object.fromEntries(["backdrop", "bright", "blur", "composite"].map((k) => [k, gl.getAttribLocation(progs[k], "a")])),
+      quad: Object.fromEntries(["backdrop", "core", "bright", "blur", "composite"].map((k) => [k, gl.getAttribLocation(progs[k], "a")])),
       line: ["aPos", "aSide", "aColor"].map((n) => gl.getAttribLocation(progs.line, n)),
       dot: ["aPos", "aSide", "aColor"].map((n) => gl.getAttribLocation(progs.dot, n)),
     };
     this.u = {
       backdrop: uniforms(progs.backdrop, ["uRes", "uCenter", "uUnit", "uTime", "uMood", "uIntro"]),
+      core: uniforms(progs.core, ["uCenter", "uUnit", "uTime", "uIntro", "uRadius", "uMotion", "uEnergy", "uTint", "uWave"]),
       line: uniforms(progs.line, ["uRes", "uGlow"]),
       dot: uniforms(progs.dot, ["uRes"]),
       bright: uniforms(progs.bright, ["uTex", "uCut"]),
@@ -431,13 +478,23 @@ class Orb3D {
     const pitch = Math.sin(t * 0.11) * 0.07 * motion - this.pointer.y;
     const c = Math.cos(yaw), sn = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
     const breath = 1 + (Math.sin(t * 0.7) * 0.008 + L * (listen * 0.035 + speak * 0.065)) * motion;
+    const coreRadius = orbCoreRadius(t, L * (listen + speak) * motion);
     const DV = G.dotVerts;
     let d = 0;
     for (let i = 0; i < G.points.length; i++) {
       const p = G.points[i];
       const wave = hasWave ? Math.max(-1, Math.min(1, this.waveBins[p.band] * waveGain)) : Math.sin(p.y * 9 + t * 2.5);
-      const ripple = Math.sin(p.y * 7 + p.z * 4 + t * 0.65) * 0.013 * motion;
-      const deform = breath + ripple + wave * L * (listen + speak) * 0.045 * motion;
+      const ripple = orbWaveAt(p.r, t);
+      let displacement = ripple * ORB_WAVE.amplitude * (1 + L * (listen + speak));
+      const deformVoice = wave * L * (listen + speak) * 0.045;
+      let pulseLight = 0;
+      for (const pulse of this.pulses) {
+        const delta = (p.r - ORB_WAVE.core - pulse.age * 0.7) / 0.12;
+        const push = Math.exp(-delta * delta) * pulse.strength * (1 - pulse.age / 1.6);
+        displacement += push * 0.04;
+        pulseLight += push;
+      }
+      const deform = breath + (displacement / Math.max(0.16, p.r) + deformVoice) * motion;
       const drift = Math.sin(t * 0.32 + p.seed * 40) * 0.009 * motion;
       const x = p.x * deform, y = p.y * deform + drift, z = p.z * deform;
       const x1 = x * c + z * sn, z1 = z * c - x * sn;
@@ -447,12 +504,9 @@ class Orb3D {
       const px = cx + x1 * perspective * U, py = cy + y1 * perspective * U;
       const reveal = Math.max(0, Math.min(1, (this.intro * 1.45 - p.r * 0.4) / 0.55));
       const twinkle = 0.68 + Math.sin(t * (0.5 + p.seed * 0.8) + p.seed * 70) * 0.18;
-      let pulseLight = 0;
-      for (const pulse of this.pulses) {
-        const delta = (p.r - pulse.age * 0.9) / 0.16;
-        pulseLight += Math.exp(-delta * delta) * pulse.strength * (1 - pulse.age / 1.6);
-      }
-      const alpha = Math.min(0.95, ((0.22 + depth * 0.6) * twinkle + pulseLight * 0.5 + L * speak * 0.12) * reveal);
+      const screenRadius = Math.hypot(x1, y1) * perspective;
+      const behindCore = screenRadius < coreRadius && z2 < Math.sqrt(Math.max(0, coreRadius * coreRadius - screenRadius * screenRadius));
+      const alpha = Math.min(0.95, ((0.22 + depth * 0.6) * (twinkle + Math.max(0, ripple) * 0.2 * motion) + pulseLight * 0.5 + L * speak * 0.12) * reveal) * (behindCore ? 0.06 : 1);
       const bright = p.size > 0.82 ? 0.7 : 0.18 + p.seed * 0.3;
       const size = (2.8 + p.size * p.size * 6.8 + Math.max(0, z2) * 1.8) * dotScale * perspective;
       G.sx[i] = px; G.sy[i] = py; G.depth[i] = depth; G.alpha[i] = alpha;
@@ -502,6 +556,19 @@ class Orb3D {
     }
 
     gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    this.quad("core", () => {
+      const u = this.u.core;
+      gl.uniform2f(u.uCenter, cx, cy);
+      gl.uniform1f(u.uUnit, U);
+      gl.uniform1f(u.uTime, t);
+      gl.uniform1f(u.uIntro, shown);
+      gl.uniform1f(u.uRadius, coreRadius);
+      gl.uniform1f(u.uMotion, motion);
+      gl.uniform1f(u.uEnergy, L * (listen + speak));
+      gl.uniform3f(u.uTint, main[0], main[1], main[2]);
+      gl.uniform4f(u.uWave, ORB_WAVE.core, ORB_WAVE.number, ORB_WAVE.speed, ORB_WAVE.amplitude);
+    });
     if (light) gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     else gl.blendFunc(gl.ONE, gl.ONE);
     const bind = (locs) => {

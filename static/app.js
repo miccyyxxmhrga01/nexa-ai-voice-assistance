@@ -732,7 +732,17 @@ async function transcribe(pcm, purpose = "", quality = "fast") {
 
 /* ---------- Drawing helpers for the orb ---------- */
 
-// Nexa's colors: mint, emerald, and aqua while she listens.
+// One travelling wave field drives the center, its visible ripples and both particle renderers.
+const ORB_WAVE = { core: 0.24, number: Math.PI * 2 / 0.42, speed: 0.24, amplitude: 0.038 };
+function orbWaveAt(radius, time) {
+  const distance = Math.max(0, radius - ORB_WAVE.core);
+  const phase = distance * ORB_WAVE.number - time * ORB_WAVE.speed * ORB_WAVE.number;
+  return Math.sin(phase) * Math.exp(-distance * 0.8);
+}
+function orbCoreRadius(time, energy) {
+  return ORB_WAVE.core * (1 + Math.sin(-time * ORB_WAVE.speed * ORB_WAVE.number) * 0.025 + energy * 0.025);
+}
+
 // Shared by WebGL and the 2D fallback. Find nearby links once with a spatial hash,
 // rather than comparing every particle with every other particle during animation.
 function createOrbCloud(count) {
@@ -819,10 +829,13 @@ class Orb {
     this.size = Math.min(spot.width, spot.height) * this.dpr;
   }
 
-  setMode(mode) { this.mode = mode; }
+  setMode(mode) {
+    if (mode !== this.mode && (mode === "listening" || mode === "speaking")) this.pulse(0.35);
+    this.mode = mode;
+  }
   setLevel(v) { this.input = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0; }
-  /** Briefly brighten the volume on a voice-state change. */
-  pulse(strength = 1) { if (!REDUCED) this.pulses.push({ r: 0.5, a: 0.3 * strength }); }
+  /** An extra travelling wave on a voice-state change. */
+  pulse(strength = 1) { if (!REDUCED) this.pulses.push({ age: 0, strength: Math.min(1, strength) }); }
 
   start({ intro = false } = {}) {
     if (intro) { this.intro = REDUCED ? 1 : 0; this.pulse(0.5); }
@@ -849,8 +862,8 @@ class Orb {
     this.thinkAmt += (+(m === "thinking") - this.thinkAmt) * ease;
     this.speakAmt += (+(m === "speaking") - this.speakAmt) * ease;
     this.intro = Math.min(1, this.intro + dt / 0.9);
-    for (const p of this.pulses) { p.r += dt * 0.8; p.a -= dt * 0.6; }
-    this.pulses = this.pulses.filter((p) => p.a > 0);
+    for (const p of this.pulses) p.age += dt;
+    this.pulses = this.pulses.filter((p) => p.age < 1.6);
     if (this.size) this.draw();
     this.raf = requestAnimationFrame(this.frame);
   }
@@ -867,7 +880,7 @@ class Orb {
       g.fillStyle = '#111c1a';
       g.fillRect(0, 0, W, H);
     }
-    const pulseLight = this.pulses.reduce((sum, pulse) => sum + pulse.a, 0);
+    const pulseLight = this.pulses.reduce((sum, pulse) => sum + pulse.strength * (1 - pulse.age / 1.6), 0);
     const haze = g.createRadialGradient(cx, cy, 0, cx, cy, R * 1.6);
     haze.addColorStop(0, rgba(ice, (0.12 + L * speak * 0.07 + pulseLight * 0.08) * shown));
     haze.addColorStop(0.55, rgba(ice, 0.035 * shown));
@@ -891,17 +904,27 @@ class Orb {
     const turn = t * (0.055 + this.thinkAmt * 0.085), c = Math.cos(turn), sn = Math.sin(turn);
     const motion = REDUCED ? 0 : 1;
     const breath = 1 + (Math.sin(t * 0.7) * 0.008 + L * (listen * 0.035 + speak * 0.065)) * motion;
+    const coreRadius = orbCoreRadius(t, L * (listen + speak) * motion);
+    this.drawCore(R, shown, ice, coreRadius);
     const wave = this.waveSource?.();
     for (let i = 0; i < cloud.points.length; i++) {
       const p = cloud.points[i], at = i * 4;
       const sample = wave?.length ? wave[Math.floor(p.band / 64 * wave.length)] || 0 : 0;
-      const scale = breath + Math.max(-1, Math.min(1, sample * 6)) * L * 0.05 * motion;
+      const ripple = orbWaveAt(p.r, t);
+      let displacement = ripple * ORB_WAVE.amplitude * (1 + L * (listen + speak));
+      for (const pulse of this.pulses) {
+        const delta = (p.r - ORB_WAVE.core - pulse.age * 0.7) / 0.12;
+        displacement += Math.exp(-delta * delta) * pulse.strength * 0.04 * (1 - pulse.age / 1.6);
+      }
+      const scale = breath + (displacement / Math.max(0.16, p.r) + Math.max(-1, Math.min(1, sample * 6)) * L * 0.05) * motion;
       const x = (p.x * c + p.z * sn) * scale, z = (p.z * c - p.x * sn) * scale;
       const perspective = 4.8 / (5 - z), depth = Math.max(0, Math.min(1, (z + 1.1) / 2.2));
       const reveal = Math.max(0, Math.min(1, (this.intro * 1.45 - p.r * 0.4) / 0.55));
       projected[at] = cx + x * perspective * R;
       projected[at + 1] = cy - p.y * scale * perspective * R;
-      projected[at + 2] = (0.18 + depth * 0.65) * reveal * (0.7 + Math.sin(t * 0.8 + p.seed * 70) * 0.18);
+      const screenRadius = Math.hypot(x, p.y * scale) * perspective;
+      const behindCore = screenRadius < coreRadius && z < Math.sqrt(Math.max(0, coreRadius * coreRadius - screenRadius * screenRadius));
+      projected[at + 2] = (0.18 + depth * 0.65) * reveal * (0.7 + Math.sin(t * 0.8 + p.seed * 70) * 0.18 + Math.max(0, ripple) * 0.2 * motion) * (behindCore ? 0.06 : 1);
       projected[at + 3] = perspective;
     }
     g.save();
@@ -923,6 +946,46 @@ class Orb {
       g.globalAlpha = projected[at + 2] * shown;
       g.drawImage(this.sprite, projected[at] - size / 2, projected[at + 1] - size / 2, size, size);
     }
+    g.restore();
+  }
+
+  drawCore(R, shown, ice, radius) {
+    const { g, cx, cy, t } = this;
+    const phase = -t * ORB_WAVE.speed * ORB_WAVE.number;
+    g.save();
+    g.globalAlpha = shown;
+    // The same outward crests as the particle displacement, fading before the cloud's edge.
+    if (!REDUCED) {
+      g.lineWidth = Math.max(0.6, this.dpr * 0.65);
+      for (let i = 0; i < 3; i++) {
+        const crest = (t * ORB_WAVE.speed + 0.105) % 0.42 + i * 0.42;
+        const rr = ORB_WAVE.core + crest;
+        const fade = Math.min(1, crest / 0.08) * Math.max(0, Math.min(1, (1.12 - rr) / 0.4));
+        g.strokeStyle = rgba(ice, fade * 0.055);
+        g.beginPath();
+        g.arc(cx, cy, rr * R, 0, Math.PI * 2);
+        g.stroke();
+      }
+    }
+    const core = radius * R;
+    const body = g.createRadialGradient(cx - core * 0.32, cy - core * 0.36, 0, cx, cy, core);
+    body.addColorStop(0, 'rgba(133,234,208,.98)');
+    body.addColorStop(0.48, 'rgba(47,147,122,.97)');
+    body.addColorStop(0.88, 'rgba(14,71,59,.97)');
+    body.addColorStop(1, 'rgba(126,239,205,.92)');
+    g.fillStyle = body;
+    g.strokeStyle = rgba(ice, 0.5);
+    g.lineWidth = Math.max(0.7, this.dpr * 0.7);
+    g.beginPath();
+    for (let i = 0; i <= 128; i++) {
+      const angle = i / 128 * Math.PI * 2;
+      const swell = REDUCED ? 0 : Math.sin(angle * 3 + phase * 0.45) * 0.008 + Math.sin(angle * 5 - phase * 0.7) * 0.003;
+      const rr = (radius + swell) * R;
+      g[i ? 'lineTo' : 'moveTo'](cx + Math.cos(angle) * rr, cy + Math.sin(angle) * rr);
+    }
+    g.closePath();
+    g.fill();
+    g.stroke();
     g.restore();
   }
 }
